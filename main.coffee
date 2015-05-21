@@ -1,4 +1,5 @@
 fs = require 'fs'
+dns = require 'dns'
 util = require 'util'
 https = require 'https'
 URL = require 'url'
@@ -7,24 +8,30 @@ Transform = require('stream').Transform
 JSONStream = require 'JSONStream'
 
 _ = require 'underscore'
-split = require 'split'
-fibrous = require 'fibrous'
+Promise = require 'promise'
 Docker = require 'dockerode'
+Etcd = require 'node-etcd'
+parseArgs = require 'minimist'
 
-class MonitorStream
-  util.inherits(MonitorStream, Transform)
+fiber = (fn)->
+  (fibrous fn)((err,ret) ->
+    throw err if err
+    return ret
+  )
+
+class StatisticsStream
+  util.inherits(StatisticsStream, Transform)
   constructor: (@container)->
     Transform.call(this, {readableObjectMode:true, objectMode:true})
     @last = null
-    @info = @container.sync.inspect()
-    @container.sync.stats()
-      .pipe(JSONStream.parse())
-      .pipe(this)
+    Promise.denodeify(@container.stats)
+      .call(@container)
+      .then (stream)=>
+        stream.pipe(JSONStream.parse()).pipe(this)
 
   _transform: (obj,encoding,cb)->
     if @last
       obj.cpu_stats.percent = @calcCpuUsage obj
-      obj.container = @info
       @push obj
 
     @last = obj
@@ -45,35 +52,65 @@ class MonitorStream
 
     return percent
 
-class EventStream
+class Monitor
+  constructor: (@container)->
+    Promise.denodeify(@container.inspect)
+      .call(@container)
+      .then (@info)=>
+        @stream = new StatisticsStream @container
+        @stream.on 'data', @onData
+
+  onData: (data) =>
+    console.info @info.Name, data.cpu_stats.percent.total
+
+  stop: =>
+    @stream.removeListener 'data', @onData
+
+class Reactor
   constructor: (@docker)->
-    return @docker.sync.getEvents()
-      .pipe(JSONStream.parse())
+    @monitors = {}
+    Promise.denodeify(@docker.getEvents)
+      .call(@docker)
+      .then (stream)=>
+        @stream = stream.pipe(JSONStream.parse())
+        @stream.on 'data', @onEvent
 
-docker = new Docker socketPath:process.env.DOCKER_PATH || 'test.sock'
-monitors = {}
-addMonitor = fibrous (id)->
-  c = docker.getContainer id
-  m = monitors[id] = new MonitorStream c
-  m.on 'data', (obj) ->
-    console.info util.format "[%s]: %d",obj.container.Name, obj.cpu_stats.percent.total
+  addMonitor: (id) =>
+    console.info "Add #{id}"
+    @monitors[id] = new Monitor @docker.getContainer id
 
-main = () ->
-  list = docker.sync.listContainers()
-  list.forEach (info)->
-    addMonitor info.Id, ->
-      console.info "Added #{info.Id}"
+  delMonitor: (id) =>
+    console.info "Del #{id}"
+    delete @monitors[id]
 
-  es = new EventStream(docker)
-  es.on 'data', (event) ->
-    console.info event
+  onEvent: (event) =>
     switch event.status
       when 'start'
-        addMonitor event.id, ->
-          console.info "Added #{event.id}"
+        @addMonitor event.id
       when 'die'
-        delete monitors[event.id]
+        @delMonitor event.id
 
-fibrous.run main,(err) ->
-  throw err if err
+
+options = parseArgs process.argv.slice(2)
+etcd = null
+docker = null
+reactor = null
+
+Promise.denodeify(dns.resolveSrv)
+  .call(this, process.env.ETCD_DNS_NAME || "etcd.local")
+  .then (rr) ->
+    etcdServers = rr.map (rr)->"#{rr.name}:#{rr.port}"
+    etcdOpts =
+      cert: fs.readFileSync process.env.ETCD_SSL_CERT || "etcd-client.crt"
+      key:  fs.readFileSync process.env.ETCD_SSL_KEY  || "etcd-client.key"
+    etcd = new Etcd etcdServers, etcdOpts
+    docker = new Docker socketPath: process.env.DOCKER_SOCK_PATH || '/var/run/docker.sock'
+    reactor = new Reactor docker
+    Promise.denodeify(docker.listContainers).call(docker)
+  .then (list) ->
+    console.info list
+    list.forEach (info) ->
+      reactor.addMonitor info.Id
+  .catch (err) ->
+    console.error err, err.stack.split '\n'
 

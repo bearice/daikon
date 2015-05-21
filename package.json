@@ -5,9 +5,12 @@
   "main": "main.js",
   "dependencies": {
     "JSONStream": "^1.0.3",
+    "deasync": "0.0.10",
     "dockerode": "^2.1.1",
     "fibrous": "^0.3.3",
+    "minimist": "^1.1.1",
     "node-etcd": "^4.0.2",
+    "promise": "^7.0.1",
     "underscore": "^1.8.3"
   },
   "devDependencies": {
@@ -17,5 +20,6 @@
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "Bearice Ren (bearice@icybear.net)",
-  "license": "MIT"
+  "license": "MIT",
+  "repository": "git@github.com:bearice/daikon.git"
 }
