@@ -54,17 +54,22 @@ class StatisticsStream
 
 class Monitor
   constructor: (@container)->
-    Promise.denodeify(@container.inspect)
-      .call(@container)
-      .then (@info)=>
-        @stream = new StatisticsStream @container
-        @stream.on 'data', @onData
+    Promise.denodeify(@container.inspect).call(@container).then @onStart
 
   onData: (data) =>
     console.info @info.Name, data.cpu_stats.percent.total
 
-  stop: =>
+  onStart: (@info)=>
+    @stream = new StatisticsStream @container
+    @stream.on 'data', @onData
+    @_etcdHandle = setInterval @updateEtcd, 30
+
+  onDeath: =>
     @stream.removeListener 'data', @onData
+    clearInterval @_etcdHandle
+
+  updateEtcd: =>
+    etcd.set "/dockers/#{@info.Id}", JSON.stringify @info, {ttl: 60}
 
 class Reactor
   constructor: (@docker)->
@@ -97,12 +102,13 @@ docker = null
 reactor = null
 
 Promise.denodeify(dns.resolveSrv)
-  .call(this, process.env.ETCD_DNS_NAME || "etcd.local")
+  .call(this, process.env.ETCD_DNS_NAME || "_etcd._tcp.local")
   .then (rr) ->
     etcdServers = rr.map (rr)->"#{rr.name}:#{rr.port}"
     etcdOpts =
       cert: fs.readFileSync process.env.ETCD_SSL_CERT || "etcd-client.crt"
       key:  fs.readFileSync process.env.ETCD_SSL_KEY  || "etcd-client.key"
+      ca:   [fs.readFileSync 'ca.crt']
     etcd = new Etcd etcdServers, etcdOpts
     docker = new Docker socketPath: process.env.DOCKER_SOCK_PATH || '/var/run/docker.sock'
     reactor = new Reactor docker
