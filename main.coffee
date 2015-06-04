@@ -102,7 +102,7 @@ class Monitor
 
   updateEtcd: =>
     console.info "Update #{@info.Id}"
-    @_timer = setTimeout @updateEtcd, 30*1000
+    @_timer = setTimeout @updateEtcd, 1000*(20+Math.random()*20)
     @registerInstance().then @checkApp
 
   cleanEtcd: =>
