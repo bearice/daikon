@@ -1,7 +1,8 @@
 FROM docker.jimubox.com/nodejs
 MAINTAINER bearice@icybear.net
 
-ADD . /opt/diakon
+ENV ETCD_DNS_NAME _etcd._tcp.zhaowei.jimubox.com
 WORKDIR /opt/daikon
-
-CMD ["node","main"]
+CMD ["coffee","main.coffee"]
+ADD etcd-client.crt etcd-client.key ca.crt node_modules /opt/daikon/
+ADD *.js *.coffee /opt/daikon/

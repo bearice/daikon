@@ -1,0 +1,6 @@
+*.coffee
+Makefile
+README.md
+package.json
+maestro.yaml
+
