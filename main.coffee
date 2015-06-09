@@ -49,30 +49,37 @@ class Monitor
   checkApp: =>
     if @_env.APP_CHECK
       @container.exec
-        Cmd: @_env.APP_CHECK.split(' ')
+        Cmd: ["/bin/sh","-c", @_env.APP_CHECK]
         AttachStdout: true
         AttachStderr: true
-      .then (exec)=>
-        Promise.denodeify(exec.start).call(exec)
-        .then (resp)=>
+      .then (exec) ->
+        Promise.denodeify(exec.start).call(exec).then (resp) ->
           new Promise (accept,reject) ->
             buf = []
-            resp.setEncoding 'utf-8'
+            len = 0
             resp
+              .on 'error', reject
               .on 'data', (data) ->
                 buf.push data
+                len += data.length
               .on 'end', ->
-                console.info buf.join("")
-                accept exec
-              .on 'error', reject
-        .then (exec) ->
-          Promise.denodeify(exec.inspect).call(exec)
-      .then (info) =>
-        console.info info
-        @registerApp()
+                buf = Buffer.concat buf,len
+                accept [exec,buf]
+      .then ([exec,buf]) ->
+        Promise.all [
+          Promise.resolve(buf),
+          Promise.denodeify(exec.inspect).call(exec),
+        ]
+      .then ([buf,info]) =>
+        console.info "#{@_env.APP_CHECK} => #{info.ExitCode}"
+        Promise.all [
+          etcd.set("/docker/instances/#{@info.Id}/app_check", info.ExitCode),
+          etcd.set("/docker/instances/#{@info.Id}/app_check_msg", buf),
+        ]
       .catch perror
     else
-      @registerApp()
+      etcd.set("/docker/instances/#{@info.Id}/app_check", 0)
+      .catch perror
 
   registerApp: =>
     if @_env.APP_NAME and @_env.ENV_NAME
@@ -103,7 +110,7 @@ class Monitor
   updateEtcd: =>
     console.info "Update #{@info.Id}"
     @_timer = setTimeout @updateEtcd, 1000*(20+Math.random()*20)
-    @registerInstance().then @checkApp
+    @registerInstance().then @registerApp
 
   cleanEtcd: =>
     console.info "Remove #{@info.Id}"

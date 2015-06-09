@@ -8,7 +8,7 @@ run: push
 	maestro restart -r
 
 %.js: %.coffee
-	coffee -c main.coffee
+	coffee -c $<
 
 node_modules: package.json
 	npm install
