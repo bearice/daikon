@@ -147,7 +147,7 @@ class Reactor
 
   delMonitor: (id) =>
     console.info "Del #{id}"
-    @monitors[id].onDeath()
+    @monitors[id]?.onDeath()
     delete @monitors[id]
 
   onEvent: (event) =>
