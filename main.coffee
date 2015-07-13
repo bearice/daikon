@@ -95,14 +95,12 @@ class Monitor
 
   registerInstance: =>
     path = "/docker/instances/#{@info.Id}"
-    etcd.mkdir(path, {ttl: 60, prevExist: false}).then =>
-      Promise.all [
-        etcd.set("#{path}/raw",   JSON.stringify(@info)),
-        etcd.set("#{path}/host",  HOST_NAME),
-        etcd.set("#{path}/ports", JSON.stringify(@_ports)),
-      ]
-    .catch =>
-      etcd.mkdir(path, {ttl: 60, prevExist: true})
+    Promise.all([
+        etcd.set("#{path}/raw",   JSON.stringify(@info),   ttl: 60),
+        etcd.set("#{path}/host",  HOST_NAME,               ttl: 60),
+        etcd.set("#{path}/ports", JSON.stringify(@_ports), ttl: 60),
+    ]).then =>
+        etcd.mkdir(path, {ttl: 60, prevExist: true})
 
   cleanInstance: =>
     etcd.rmdir("/docker/instances/#{@info.Id}", {recursive: true})
