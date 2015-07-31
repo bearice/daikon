@@ -37,7 +37,6 @@ class Monitor
     @_ports = @getPorts()
     @stream = new DockerStatsStream @container
     @stream.on 'data', @onData
-    @checkApp()
     @updateEtcd()
 
   onDeath: =>
@@ -47,6 +46,7 @@ class Monitor
     @cleanEtcd()
 
   checkApp: =>
+    return pass() if @_appCheckPassed
     if @_env.APP_CHECK
       @container.exec
         Cmd: ["/bin/sh","-c", @_env.APP_CHECK]
@@ -76,20 +76,24 @@ class Monitor
           etcd.set("/docker/instances/#{@info.Id}/app_check", info.ExitCode),
           etcd.set("/docker/instances/#{@info.Id}/app_check_msg", buf),
         ]
+      .then => @_appCheckPassed = true
       .catch perror
     else
       etcd.set("/docker/instances/#{@info.Id}/app_check", 0)
-      .catch perror
+        .then => @_appCheckPassed = true
+        .catch perror
 
   registerApp: =>
-    if @_env.APP_NAME and @_env.ENV_NAME
-      etcd.set("/docker/apps/#{@_env.ENV_NAME}/#{@_env.APP_NAME}/#{@info.Name}@#{HOST_NAME}", @info.Id, {ttl: 60})
+    return pass()
+    if @_env.APP_NAME and @_env.ENV_NAME and @_env.CUR_TERM
+      etcd.set("/docker/apps/#{@_env.ENV_NAME}/#{@_env.APP_NAME}/#{@_env.CUR_TERM}/#{@info.Name}@#{HOST_NAME}", @info.Id, {ttl: 60})
     else
       pass()
 
   cleanApp: =>
-    if @_env.APP_NAME and @_env.ENV_NAME
-      etcd.del("/docker/apps/#{@_env.ENV_NAME}/#{@_env.APP_NAME}/#{@info.Name}@#{HOST_NAME}")
+    return pass()
+    if @_env.APP_NAME and @_env.ENV_NAME and @_env.CUR_TERM
+      etcd.del("/docker/apps/#{@_env.ENV_NAME}/#{@_env.APP_NAME}/#{@_env.CUR_TERM}/#{@info.Name}@#{HOST_NAME}")
     else
       pass()
 
@@ -97,8 +101,10 @@ class Monitor
     path = "/docker/instances/#{@info.Id}"
     Promise.all([
         etcd.set("#{path}/raw",   JSON.stringify(@info),   ttl: 60),
-        etcd.set("#{path}/host",  HOST_NAME,               ttl: 60),
         etcd.set("#{path}/ports", JSON.stringify(@_ports), ttl: 60),
+        etcd.set("#{path}/host",  HOST_NAME,               ttl: 60),
+        etcd.set("#{path}/name",  @info.Name,              ttl: 60),
+        etcd.set("#{path}/ip",    @info.NetworkSettings.IPAddress, ttl: 60),
     ]).then =>
         etcd.mkdir(path, {ttl: 60, prevExist: true})
 
@@ -108,7 +114,7 @@ class Monitor
   updateEtcd: =>
     console.info "Update #{@info.Id}"
     @_timer = setTimeout @updateEtcd, 1000*(20+Math.random()*20)
-    @registerInstance().then @registerApp
+    @registerInstance().then(@registerApp).then(@checkApp)
 
   cleanEtcd: =>
     console.info "Remove #{@info.Id}"
@@ -126,8 +132,9 @@ class Monitor
 
   getPorts: =>
     ret = {}
+    ip = HOST_ADDR
     for k,v of @info.NetworkSettings.Ports
-      ret[k] = "#{HOST_ADDR}:#{v[0].HostPort}" if v
+      ret[k] = "#{ip}:#{v[0].HostPort}" if v
     return ret
 
 class Reactor
