@@ -24,7 +24,7 @@ pass = -> Promise.resolve 'pass'
 
 class Monitor
   constructor: (@container)->
-    @container.inspect().then(@onStart).done()
+    @container.inspect().then(@onStart).catch perror
 
   onData: (data) =>
     #console.info @info.Name, data.cpu_stats.percent.total
@@ -37,7 +37,7 @@ class Monitor
     @_ports = @getPorts()
     @stream = new DockerStatsStream @container
     @stream.on 'data', @onData
-    @updateEtcd()
+    @_timer = setTimeout @updateEtcd, 0
 
   onDeath: =>
     console.info "Stop #{@info.Id}"
