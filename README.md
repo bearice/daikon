@@ -1,3 +1,3 @@
 # daikon
 
-Daikon is an agent keep watch docker server and write instance information into etcd
+Daikon is an agent keep watching docker server and sync instance information into etcd 
