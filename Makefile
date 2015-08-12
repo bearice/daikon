@@ -1,26 +1,31 @@
-IMAGE_TAG=docker.jimubox.com/daikon
+NPM=npm
+NODE=node
+COFFEE=node_modules/coffee-script/bin/coffee
+PEGJS=node_modules/pegjs/bin/pegjs
+MOCHA=node_modules/mocha/bin/mocha
 
-all: docker
-push: docker
-	docker push $(IMAGE_TAG)
+TARGETS=$(patsubst src/%.coffee,lib/%.js,$(shell find src -name \*.coffee))
 
-run: push
-	maestro restart -r
+all: node_modules $(TARGETS)
 
-%.js: %.coffee
-	coffee -c $<
+lib/%.js: src/%.coffee
+	@mkdir -p $(shell dirname $@)
+	$(COFFEE) -c -m -o $(shell dirname $@) "$<"
 
 node_modules: package.json
-	npm install
-
-docker: main.js dockerstats.js node_modules Dockerfile
-	docker build -t $(IMAGE_TAG) .
+	$(NPM) install
 
 clean:
-	-docker rmi $(IMAGE_TAG)
-	rm main.js
+	find lib -name \*.map -delete
+	rm -rf $(TARGETS)
 
-#run: all
-#	docker run --hostname $(shell hostname) --name daikon --rm -v /var/run/docker.sock:/var/run/docker.sock -e ETCD_DNS_NAME=_etcd._tcp.zhaowei.jimubox.com docker.jimubox.com/daikon
+run: all
+	node lib/main
 
-.PHONY: docker push run clean
+watch:
+	nodemon -w src
+
+test: all
+	$(MOCHA) --compilers coffee:coffee-script/register
+
+.PHONY: all clean run watch
