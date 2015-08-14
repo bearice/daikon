@@ -6,7 +6,7 @@
   "dependencies": {
     "JSONStream": "^1.0.3",
     "dockerode": "^2.2.2",
-    "dockerode-promise": "bearice/dockerode-promise",
+    "dockerode-promise": "^0.1.0",
     "ip": "^0.3.3",
     "minimisty": "^1.0.3",
     "node-etcd-promise": "^1.0.0",

@@ -98,7 +98,7 @@ class Monitor
       info = yield exec.inspect()
       console.info "#{@_env.APP_CHECK} => #{info.ExitCode}"
       yield @etcd.set("/docker/instances/#{@info.Id}/app_check", info.ExitCode)
-      yield @etcd.set("/docker/instances/#{@info.Id}/app_check_msg", buf)
+      yield @etcd.set("/docker/instances/#{@info.Id}/app_check_msg", output)
     else
       yield @etcd.set("/docker/instances/#{@info.Id}/app_check", 0)
     @_appCheckPassed = true
@@ -156,7 +156,7 @@ class Reactor
     delete @monitors[id]
 
   onEvent: (event) =>
-    console.info event.status
+    #console.info event.status
     switch event.status
       when 'start'
         @syncNode()
