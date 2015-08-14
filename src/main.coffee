@@ -11,6 +11,9 @@ Docker = require 'dockerode-promise'
 Promise = require 'promise'
 JSONStream = require 'JSONStream'
 
+resolveSrv = Promise.denodeify(dns.resolveSrv)
+{execYields,getStreamContent} = require './promise-utils'
+
 DockerStatsStream = require './dockerstats'
 
 HOST_NAME = process.env.HOST_NAME
@@ -23,21 +26,15 @@ perror = (e)->
 pass = -> Promise.resolve 'pass'
 
 class Monitor
-  constructor: (@container)->
-    @container.inspect().then(@onStart).catch perror
-
-  onData: (data) =>
-    #console.info @info.Name, data.cpu_stats.percent.total
-    #TODO write stats data into kafka
+  constructor: (@etcd,@container)->
 
   onStart: (@info)=>
+    @info = yield @container.inspect()
     console.info "Start #{@info.Id}#{@info.Name}"
     @info.Name = @info.Name.replace(/^\//,'')
     @_env = @getEnv()
     @_ports = @getPorts()
-    @stream = new DockerStatsStream @container
-    @stream.on 'data', @onData
-    @_timer = setTimeout @updateEtcd, 0
+    @updateEtcd()
 
   onDeath: =>
     console.info "Stop #{@info.Id}"
@@ -45,80 +42,44 @@ class Monitor
     clearTimeout @_timer if @_timer
     @cleanEtcd()
 
-  checkApp: =>
-    return pass() if @_appCheckPassed
-    if @_env.APP_CHECK
-      @container.exec
-        Cmd: ["/bin/sh","-c", @_env.APP_CHECK]
-        AttachStdout: true
-        AttachStderr: true
-      .then (exec) ->
-        Promise.denodeify(exec.start).call(exec).then (resp) ->
-          new Promise (accept,reject) ->
-            buf = []
-            len = 0
-            resp
-              .on 'error', reject
-              .on 'data', (data) ->
-                buf.push data
-                len += data.length
-              .on 'end', ->
-                buf = Buffer.concat buf,len
-                accept [exec,buf]
-      .then ([exec,buf]) ->
-        Promise.all [
-          Promise.resolve(buf),
-          Promise.denodeify(exec.inspect).call(exec),
-        ]
-      .then ([buf,info]) =>
-        console.info "#{@_env.APP_CHECK} => #{info.ExitCode}"
-        Promise.all [
-          etcd.set("/docker/instances/#{@info.Id}/app_check", info.ExitCode),
-          etcd.set("/docker/instances/#{@info.Id}/app_check_msg", buf),
-        ]
-      .then => @_appCheckPassed = true
-      .catch perror
-    else
-      etcd.set("/docker/instances/#{@info.Id}/app_check", 0)
-        .then => @_appCheckPassed = true
-        .catch perror
-
-  registerApp: =>
-    return pass()
-    if @_env.APP_NAME and @_env.ENV_NAME and @_env.CUR_TERM
-      etcd.set("/docker/apps/#{@_env.ENV_NAME}/#{@_env.APP_NAME}/#{@_env.CUR_TERM}/#{@info.Name}@#{HOST_NAME}", @info.Id, {ttl: 60})
-    else
-      pass()
-
-  cleanApp: =>
-    return pass()
-    if @_env.APP_NAME and @_env.ENV_NAME and @_env.CUR_TERM
-      etcd.del("/docker/apps/#{@_env.ENV_NAME}/#{@_env.APP_NAME}/#{@_env.CUR_TERM}/#{@info.Name}@#{HOST_NAME}")
-    else
-      pass()
-
-  registerInstance: =>
-    path = "/docker/instances/#{@info.Id}"
-    Promise.all([
-        etcd.set("#{path}/raw",   JSON.stringify(@info),   ttl: 60),
-        etcd.set("#{path}/ports", JSON.stringify(@_ports), ttl: 60),
-        etcd.set("#{path}/host",  HOST_NAME,               ttl: 60),
-        etcd.set("#{path}/name",  @info.Name,              ttl: 60),
-        etcd.set("#{path}/ip",    @info.NetworkSettings.IPAddress, ttl: 60),
-    ]).then =>
-        etcd.mkdir(path, {ttl: 60, prevExist: true})
-
-  cleanInstance: =>
-    etcd.rmdir("/docker/instances/#{@info.Id}", {recursive: true})
-
   updateEtcd: =>
     console.info "Update #{@info.Id}"
     @_timer = setTimeout @updateEtcd, 1000*(20+Math.random()*20)
-    @registerInstance().then(@registerApp).then(@checkApp)
+    execYields @registerInstance
 
   cleanEtcd: =>
     console.info "Remove #{@info.Id}"
-    @cleanApp().then @cleanInstance
+    execYields @cleanInstance
+
+  registerInstance: =>
+    path = "/docker/instances/#{@info.Id}"
+    yield @etcd.set("#{path}/raw",   JSON.stringify(@info),   ttl: 60),
+    yield @etcd.set("#{path}/ports", JSON.stringify(@_ports), ttl: 60),
+    yield @etcd.set("#{path}/host",  HOST_NAME,               ttl: 60),
+    yield @etcd.set("#{path}/name",  @info.Name,              ttl: 60),
+    yield @etcd.set("#{path}/ip",    @info.NetworkSettings.IPAddress, ttl: 60),
+    yield @etcd.mkdir(path, {ttl: 60, prevExist: true})
+    yield @checkApp()
+
+  cleanInstance: =>
+    yield etcd.rmdir("/docker/instances/#{@info.Id}", {recursive: true})
+
+  checkApp: =>
+    return if @_appCheckPassed
+    if @_env.APP_CHECK
+      exec = yield @container.exec
+        Cmd: ["/bin/sh","-c", @_env.APP_CHECK]
+        AttachStdout: true
+        AttachStderr: true
+      resp = yield exec.start()
+      output = yield getStreamContent resp
+      info = yield exec.inspect()
+      console.info "#{@_env.APP_CHECK} => #{info.ExitCode}"
+      yield etcd.set("/docker/instances/#{@info.Id}/app_check", info.ExitCode)
+      yield etcd.set("/docker/instances/#{@info.Id}/app_check_msg", buf)
+    else
+      yield etcd.set("/docker/instances/#{@info.Id}/app_check", 0)
+    @_appCheckPassed = true
 
   getEnv: =>
     @info.Config.Env.reduce (acc,str)->
@@ -138,17 +99,22 @@ class Monitor
     return ret
 
 class Reactor
-  constructor: (@docker)->
+  constructor: (@etcd,@docker)->
     @monitors = {}
-    @docker.getEvents()
-      .then (stream)=>
-        @stream = stream.pipe(JSONStream.parse())
-        @stream.on 'data', @onEvent
-      .done()
+
+  init: ->
+    list = yield docker.listContainers()
+    list.forEach (info) -> reactor.addMonitor info.Id
+    @stream = yield @docker.getEvents()
+    @stream = @stream.pipe(JSONStream.parse())
+    @stream.on 'data', @onEvent
+    process.on 'SIGTERM', @shutdown
+    process.on 'SIGINT',  @shutdown
 
   addMonitor: (id) =>
     console.info "Add #{id}"
-    @monitors[id] = new Monitor @docker.getContainer id
+    @monitors[id] = new Monitor @etcd,@docker.getContainer id
+    execYields @monitors[id].onStart
 
   delMonitor: (id) =>
     console.info "Del #{id}"
@@ -175,16 +141,10 @@ class Reactor
       process.exit(0)
     )
 
-etcd = null
-docker = null
-reactor = null
-
-resolveSrv = Promise.denodeify(dns.resolveSrv)
-resolveSrv(process.env.ETCD_DNS_NAME || "_etcd._tcp.local")
-.then (rr) ->
+execYields ->
+  rr = yield resolveSrv(process.env.ETCD_DNS_NAME || "_etcd._tcp.local")
   console.info "etcd servers", rr
-  rr.map (rr)->"#{rr.name}:#{rr.port}"
-.then (etcdServers) ->
+  etcdServers = rr.map (rr)->"#{rr.name}:#{rr.port}"
   etcdOpts =
     cert: fs.readFileSync process.env.ETCD_SSL_CERT || "etcd-client.crt"
     key:  fs.readFileSync process.env.ETCD_SSL_KEY  || "etcd-client.key"
@@ -192,16 +152,8 @@ resolveSrv(process.env.ETCD_DNS_NAME || "_etcd._tcp.local")
 
   etcd    = new Etcd etcdServers, etcdOpts
   docker  = new Docker socketPath: process.env.DOCKER_SOCK_PATH || '/var/run/docker.sock'
-  reactor = new Reactor docker
+  reactor = new Reactor etcd,docker
+  yield reactor.init()
 
-  process.on 'SIGTERM', reactor.shutdown
-  process.on 'SIGINT', reactor.shutdown
-
-.then ->
-  docker.listContainers()
-.then (list) ->
-  list.forEach (info) ->
-    reactor.addMonitor info.Id
-.catch perror
 
 

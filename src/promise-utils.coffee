@@ -23,10 +23,26 @@ class PromiseUtils
         .catch (e)->
           handle gen.throw(e)
     try
+      gen = gen() if gen instanceof Function
       handle gen
     catch e
       console.info e.stack
       Promise.reject e
+
+  @getStreamContent: (stream)->
+    new Promise (accept,reject)->
+      buf = []
+      len = 0
+      stream.on 'data', (data) ->
+        buf.push data
+        len += data.length
+      stream.on 'error', (error)->
+        buf = Buffer.concat buf,len
+        error.buffer = buf
+        reject error
+      stream.on 'end', ->
+        buf = Buffer.concat buf,len
+        accept buf
 
 module.exports = PromiseUtils
 
