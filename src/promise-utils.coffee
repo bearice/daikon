@@ -44,5 +44,13 @@ class PromiseUtils
         buf = Buffer.concat buf,len
         accept buf
 
+  @ensure: (promise)->
+    promise.catch (e)->
+      if e.stack
+        console.info e.stack
+      else
+        console.info e
+      process.exit 255
+
 module.exports = PromiseUtils
 

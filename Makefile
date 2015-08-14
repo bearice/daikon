@@ -31,4 +31,7 @@ test: all
 docker: all
 	docker build -t docker.jimubox.com/daikon .
 
+push: docker
+	docker push docker.jimubox.com/daikon
+
 .PHONY: all clean run watch

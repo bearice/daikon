@@ -1,3 +1,4 @@
+require('source-map-support').install()
 fs = require 'fs'
 os = require 'os'
 ip = require 'ip'
@@ -12,9 +13,8 @@ Etcd = require 'node-etcd-promise'
 Docker = require 'dockerode-promise'
 Promise = require 'promise'
 JSONStream = require 'JSONStream'
-
 resolveSrv = Promise.denodeify(dns.resolveSrv)
-{execYields,getStreamContent} = require './promise-utils'
+{execYields,getStreamContent,ensure} = require './promise-utils'
 
 DockerStatsStream = require './dockerstats'
 
@@ -67,11 +67,11 @@ class Monitor
   updateEtcd: =>
     console.info "Update #{@info.Id}"
     @_timer = setTimeout @updateEtcd, 1000*(20+Math.random()*20)
-    execYields @registerInstance
+    ensure execYields @registerInstance
 
   cleanEtcd: =>
     console.info "Remove #{@info.Id}"
-    execYields @cleanInstance
+    ensure execYields @cleanInstance
 
   registerInstance: =>
     path = "/docker/instances/#{@info.Id}"
@@ -97,10 +97,10 @@ class Monitor
       output = yield getStreamContent resp
       info = yield exec.inspect()
       console.info "#{@_env.APP_CHECK} => #{info.ExitCode}"
-      yield etcd.set("/docker/instances/#{@info.Id}/app_check", info.ExitCode)
-      yield etcd.set("/docker/instances/#{@info.Id}/app_check_msg", buf)
+      yield @etcd.set("/docker/instances/#{@info.Id}/app_check", info.ExitCode)
+      yield @etcd.set("/docker/instances/#{@info.Id}/app_check_msg", buf)
     else
-      yield etcd.set("/docker/instances/#{@info.Id}/app_check", 0)
+      yield @etcd.set("/docker/instances/#{@info.Id}/app_check", 0)
     @_appCheckPassed = true
 
   getEnv: =>
@@ -123,9 +123,10 @@ class Reactor
   constructor: (@etcd,@docker)->
     @monitors = {}
 
-  init: ->
-    list = yield docker.listContainers()
-    list.forEach (info) -> reactor.addMonitor info.Id
+  init: =>
+    list = yield @docker.listContainers()
+    list.forEach (info) => @addMonitor info.Id
+    @syncNode()
     @stream = yield @docker.getEvents()
     @stream = @stream.pipe(JSONStream.parse())
     @stream.on 'data', @onEvent
@@ -136,18 +137,18 @@ class Reactor
     console.info "Sync node info"
     clearTimeout @_timer if @_timer
     @_timer = setTimeout @syncNode, 1000*(20+Math.random()*20) #randomlize update interval to avoid write congestion
-    execYields @doSyncNode
+    ensure execYields @doSyncNode
 
   doSyncNode: =>
     info = yield @docker.info()
     info.Version = yield @docker.version()
     info.Endpoint = ENDPOINT
-    yield etcd.set "/docker/servers/#{HOSTNAME}", JSON.stringify info, ttl: 60
+    yield @etcd.set "/docker/servers/#{HOSTNAME}", JSON.stringify info, ttl: 60
 
   addMonitor: (id) =>
     console.info "Add #{id}"
     @monitors[id] = new Monitor @etcd,@docker.getContainer id
-    execYields @monitors[id].onStart
+    ensure execYields @monitors[id].onStart
 
   delMonitor: (id) =>
     console.info "Del #{id}"
@@ -178,7 +179,7 @@ class Reactor
     )
 
 #main function
-execYields ->
+ensure execYields ->
   rr = yield resolveSrv(ETCD_DNS_NAME)
   console.info "etcd servers", rr
   etcdServers = rr.map (rr)->"#{rr.name}:#{rr.port}"
@@ -190,6 +191,5 @@ execYields ->
   docker  = new Docker socketPath: DOCKER_SOCKET
   reactor = new Reactor etcd,docker
   yield reactor.init()
-
 
 

@@ -5,13 +5,13 @@
   "main": "main.js",
   "dependencies": {
     "JSONStream": "^1.0.3",
-    "dockerode": "^2.1.1",
+    "dockerode": "^2.2.2",
     "dockerode-promise": "bearice/dockerode-promise",
     "ip": "^0.3.3",
     "minimisty": "^1.0.3",
-    "node-etcd": "^4.0.2",
     "node-etcd-promise": "^1.0.0",
     "promise": "^7.0.1",
+    "source-map-support": "^0.3.2",
     "underscore": "^1.8.3"
   },
   "devDependencies": {
