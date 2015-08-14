@@ -75,11 +75,11 @@ class Monitor
 
   registerInstance: =>
     path = "/docker/instances/#{@info.Id}"
-    yield @etcd.set("#{path}/raw",   JSON.stringify(@info),   ttl: 60),
-    yield @etcd.set("#{path}/ports", JSON.stringify(@_ports), ttl: 60),
-    yield @etcd.set("#{path}/host",  HOSTNAME,                ttl: 60),
-    yield @etcd.set("#{path}/name",  @info.Name,              ttl: 60),
-    yield @etcd.set("#{path}/ip",    @info.NetworkSettings.IPAddress, ttl: 60),
+    yield @etcd.set("#{path}/raw",   JSON.stringify(@info),   ttl: 60)
+    yield @etcd.set("#{path}/ports", JSON.stringify(@_ports), ttl: 60)
+    yield @etcd.set("#{path}/host",  HOSTNAME,                ttl: 60)
+    yield @etcd.set("#{path}/name",  @info.Name,              ttl: 60)
+    yield @etcd.set("#{path}/ip",    @info.NetworkSettings.IPAddress, ttl: 60)
     yield @etcd.mkdir(path, {ttl: 60, prevExist: true})
     yield @checkApp()
 
