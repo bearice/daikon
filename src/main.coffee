@@ -60,7 +60,6 @@ class Monitor
 
   onDeath: =>
     console.info "Stop #{@info.Id}"
-    @stream.removeListener 'data', @onData
     clearTimeout @_timer if @_timer
     @cleanEtcd()
 
