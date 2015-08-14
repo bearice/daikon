@@ -28,4 +28,7 @@ watch:
 test: all
 	$(MOCHA) --compilers coffee:coffee-script/register
 
+docker: all
+	docker build -t docker.jimubox.com/daikon .
+
 .PHONY: all clean run watch
