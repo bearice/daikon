@@ -171,6 +171,7 @@ class Reactor
       process.exit(1)
     @_isShutdown = true
     console.info "Shuting down ..."
+    @etcd.del "/docker/servers/#{HOSTNAME}"
     Promise.all(_.map(@monitors, (m)->
       m.onDeath()
     )).then( ->
