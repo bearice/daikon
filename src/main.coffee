@@ -22,22 +22,24 @@ argv = require 'minimisty'
 if argv._flags.help || argv._flags.h
   console.info """
   Usage: daikon [options]
-    -e --etcd      $ETCD_DNS_NAME  etcd dns name            [_etcd._tcp.local]
-    -c --cert      $ETCD_SSL_CERT  etcd certificate         [certs/etcd-client.crt]
-    -k --key       $ETCD_SSL_KEY   etcd key                 [certs/etcd-client.key]
-    -a --ca        $ETCD_SSL_CA    etcd ca                  [certs/ca.crt]
-    -n --nossl     $ETCD_NO_SSL    disable ssl
-    -H --hostname  $HOSTNAME       report host name         [os.hostname()]
-    -A --hostaddr  $HOSTADDR       report host ip           [auto detect]
-    -I --hostintf  $HOSTINTF       report interface ip
-    -d --docker    $DOCKER_SOCKET  docker socket path       [/var/run/docker.sock]
-    -h --help                      show this message
+    -e --etcd      $ETCD_DNS_NAME   etcd dns name            [_etcd._tcp.local]
+    -c --cert      $ETCD_SSL_CERT   etcd certificate         [certs/etcd-client.crt]
+    -k --key       $ETCD_SSL_KEY    etcd key                 [certs/etcd-client.key]
+    -a --ca        $ETCD_SSL_CA     etcd ca                  [certs/ca.crt]
+    -n --nossl     $ETCD_NO_SSL     disable ssl
+    -H --hostname  $HOSTNAME        report host name         [os.hostname()]
+    -A --hostaddr  $HOSTADDR        report host ip           [auto detect]
+    -I --hostintf  $HOSTINTF        report interface ip
+    -E --endpoint  $ENDPOINT        report docker endpint    [hostname:2376]
+    -d --docker    $DOCKER_SOCKET   docker socket path       [/var/run/docker.sock]
+    -h --help                       show this message
   """
   process.exit(0)
 
 HOSTNAME = process.env.HOSTNAME || argv['hostname'] || argv.H || os.hostname()
 HOSTINTF = process.env.HOSTINTF || argv['hostintf'] || argv.I
 HOSTADDR = process.env.HOSTADDR || argv['hostaddr'] || argv.A || ip.address HOSTINTF
+ENDPOINT = process.env.ENDPOINT || argv['endpoint'] || argv.E || HOSTNAME + ":2376"
 DOCKER_SOCKET = process.env.DOCKER_SOCKET || argv['docker']   || argv.d || "/var/run/docker.sock"
 ETCD_DNS_NAME = process.env.ETCD_DNS_NAME || argv['etcd']     || argv.e || "_etcd._tcp.local"
 ETCD_SSL_CERT = process.env.ETCD_SSL_CERT || argv['cert']     || argv.c || "certs/etcd-client.crt"
@@ -130,6 +132,18 @@ class Reactor
     process.on 'SIGTERM', @shutdown
     process.on 'SIGINT',  @shutdown
 
+  syncNode: =>
+    console.info "Sync node info"
+    clearTimeout @_timer if @_timer
+    @_timer = setTimeout @syncNode, 1000*(20+Math.random()*20) #randomlize update interval to avoid write congestion
+    execYields @doSyncNode
+
+  doSyncNode: =>
+    info = yield @docker.info()
+    info.Version = yield @docker.version()
+    info.Endpoint = ENDPOINT
+    yield etcd.set "/docker/servers/#{HOSTNAME}", JSON.stringify info, ttl: 60
+
   addMonitor: (id) =>
     console.info "Add #{id}"
     @monitors[id] = new Monitor @etcd,@docker.getContainer id
@@ -141,10 +155,13 @@ class Reactor
     delete @monitors[id]
 
   onEvent: (event) =>
+    console.info event.status
     switch event.status
       when 'start'
+        @syncNode()
         @addMonitor event.id
       when 'die'
+        @syncNode()
         @delMonitor event.id
 
   shutdown: =>
