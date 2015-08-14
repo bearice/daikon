@@ -143,7 +143,7 @@ class Reactor
     info = yield @docker.info()
     info.Version = yield @docker.version()
     info.Endpoint = ENDPOINT
-    yield @etcd.set "/docker/servers/#{HOSTNAME}", JSON.stringify info, ttl: 60
+    yield @etcd.set "/docker/servers/#{HOSTNAME}", JSON.stringify(info), ttl: 60
 
   addMonitor: (id) =>
     console.info "Add #{id}"
