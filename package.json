@@ -7,6 +7,8 @@
     "JSONStream": "^1.0.3",
     "dockerode": "^2.1.1",
     "dockerode-promise": "bearice/dockerode-promise",
+    "ip": "^0.3.3",
+    "minimisty": "^1.0.3",
     "node-etcd": "^4.0.2",
     "node-etcd-promise": "^1.0.0",
     "promise": "^7.0.1",
