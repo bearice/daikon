@@ -14,7 +14,7 @@ Docker = require 'dockerode-promise'
 Promise = require 'promise'
 JSONStream = require 'JSONStream'
 resolveSrv = Promise.denodeify(dns.resolveSrv)
-{execYields,getStreamContent,ensure} = require './promise-utils'
+{execYields,getStreamContent,ensure,showErrors} = require './promise-utils'
 
 DockerStatsStream = require './dockerstats'
 
@@ -66,11 +66,11 @@ class Monitor
   updateEtcd: =>
     console.info "Update #{@info.Id}"
     @_timer = setTimeout @updateEtcd, 1000*(20+Math.random()*20)
-    ensure execYields @registerInstance
+    showErrors execYields @registerInstance
 
   cleanEtcd: =>
     console.info "Remove #{@info.Id}"
-    ensure execYields @cleanInstance
+    showErrors execYields @cleanInstance
 
   registerInstance: =>
     path = "/docker/instances/#{@info.Id}"
@@ -136,7 +136,7 @@ class Reactor
     console.info "Sync node info"
     clearTimeout @_timer if @_timer
     @_timer = setTimeout @syncNode, 1000*(20+Math.random()*20) #randomlize update interval to avoid write congestion
-    ensure execYields @doSyncNode
+    showErrors execYields @doSyncNode
 
   doSyncNode: =>
     info = yield @docker.info()
@@ -147,7 +147,7 @@ class Reactor
   addMonitor: (id) =>
     console.info "Add #{id}"
     @monitors[id] = new Monitor @etcd,@docker.getContainer id
-    ensure execYields @monitors[id].onStart
+    showErrors execYields @monitors[id].onStart
 
   delMonitor: (id) =>
     console.info "Del #{id}"

@@ -44,6 +44,13 @@ class PromiseUtils
         buf = Buffer.concat buf,len
         accept buf
 
+  @showErrors: (p)->
+    p.catch (e)->
+      if e.stack
+        console.info e.stack
+      else
+        console.info e
+
   @ensure: (promise)->
     promise.catch (e)->
       if e.stack
